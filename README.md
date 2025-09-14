@@ -9,7 +9,7 @@ This project predicts customer churn using machine learning techniques. It uses 
 - Scikit-learn
 - Matplotlib, Seaborn
 - SMOTE (for class imbalance)
-- Random Forest, Logistic Regression, XGBoost
+- Random Forest, XGBoost
 
 ## Key Features
 - Data cleaning and preprocessing
