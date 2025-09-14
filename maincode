@@ -1,42 +1,181 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 from sklearn.preprocessing import LabelEncoder
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
-
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 import pickle
-df = pd.read_csv("data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
-df = df.drop(columns=["customerID"])  # Drop irrelevant column
-df.info()
+
+# DATA LOADING
+df = pd.read_csv("dataset.csv")
+df.shape
 df.head()
+df.info()
+
+# DROPPING UNNECESSARY COLUMN
+df = df.drop(columns=['customerID'], axis=1)
+df.columns
+
+# PRINTING UNIQUE VALUES IN ALL COLUMNS LEAVING OUT NUMERICAL ONES
+numerical_features = ['tenure', 'MonthlyCharges', 'TotalCharges']
 for col in df.columns:
-    if col not in ["tenure", "MonthlyCharges", "TotalCharges"]:
+    if col not in numerical_features:
         print(col, df[col].unique())
-df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
-df.dropna(inplace=True)
-le = LabelEncoder()
-for column in df.columns:
-    if df[column].dtype == object:
-        df[column] = le.fit_transform(df[column])
-X = df.drop("Churn", axis=1)
-y = df["Churn"]
+        print("-" * 50)
 
-sm = SMOTE(random_state=42)
-X_res, y_res = sm.fit_resample(X, y)
+df['TotalCharges'] = df['TotalCharges'].replace({" ": "0.0"})
 
-X_train, X_test, y_train, y_test = train_test_split(X_res, y_res, test_size=0.2, random_state=42)
-model = RandomForestClassifier(random_state=42)
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
+# CONVERTING TOTAL CHARGES TO FLOAT
+df['TotalCharges'] = df['TotalCharges'].astype(float)
+df.info()
 
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print(confusion_matrix(y_test, y_pred))
-print(classification_report(y_test, y_pred))
-pickle.dump(model, open("churn_model.pkl", "wb"))
+# Checking class distribution of target column
+print(df['Churn'].value_counts())
+df.describe()
+
+def plot_histogram(df, column_name):
+    plt.figure(figsize=(5, 3))
+    sns.histplot(df[column_name], kde=True)
+    plt.title(f"Distribution of {column_name}")
+    col_mean = df[column_name].mean()
+    col_median = df[column_name].median()
+    plt.axvline(col_mean, color='red', linestyle='--', label="Mean")
+    plt.axvline(col_median, color='green', linestyle='-', label="Median")
+    plt.legend()
+    plt.show()
+
+plot_histogram(df, 'tenure')
+plot_histogram(df, 'MonthlyCharges')
+plot_histogram(df, 'TotalCharges')
+
+def boxplot(df, column_name):
+    plt.figure(figsize=(5, 3))
+    sns.boxplot(y=df[column_name])
+    plt.title(f"Distribution of {column_name}")
+    plt.ylabel(column_name)
+    plt.show
+
+boxplot(df, 'tenure')
+boxplot(df, 'MonthlyCharges')
+boxplot(df, 'TotalCharges')
+
+# CORRELATION HEATMAP
+plt.figure(figsize=(8, 6))
+sns.heatmap(df[['tenure', 'MonthlyCharges', 'TotalCharges']].corr(), annot=True, cmap="coolwarm", fmt='.2f')
+plt.title("Correlation HeatMap")
+plt.show()
+
+# CATEGORICAL ANALYSIS
+object_list = df.select_dtypes(include='object').columns.to_list()
+object_list = ['SeniorCitizen'] + object_list
+
+for col in object_list:
+    plt.figure(figsize=(6, 3))
+    sns.countplot(x=df[col])
+    plt.title(f"CountPlot of {col}")
+    plt.show()
+    plt.tight_layout()
+
+# LABEL ENCODING TARGET COLUMN
+df['Churn'] = df['Churn'].replace({"Yes": 1, "No": 0})
+
+# LABEL ENCODING OF CATEGORICAL COLUMNS
+object_columns = df.select_dtypes(include='object').columns
+print(object_columns)
+
+encoders = {}
+for column in object_columns:
+    label_encoder = LabelEncoder()
+    df[column] = label_encoder.fit_transform(df[column])
+    encoders[column] = label_encoder
+
+with open("encoders.pkl", "wb") as f:
+    pickle.dump(encoders, f)
+
+df.head(5)
+
+# Splitting the features and the target
+X = df.drop(columns=['Churn'])
+Y = df['Churn']
+
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+print(Y_train.shape)
+print(Y_train.value_counts())
+
+# APPLYING SMOTE
+smote = SMOTE(random_state=42)
+X_train_smote, Y_train_smote = smote.fit_resample(X_train, Y_train)
+print(Y_train_smote.shape)
+print(Y_train_smote.value_counts())
+
+models = {
+    "Decision Tree": DecisionTreeClassifier(random_state=42),
+    "Random Forest": RandomForestClassifier(random_state=42),
+    "XGBoost": XGBClassifier(random_state=42)
+}
+
+cv_score = {}
+for model_name, model in models.items():
+    print(f"Training {model_name} with default parameters")
+    scores = cross_val_score(model, X_train_smote, Y_train_smote, cv=5, scoring="accuracy")
+    cv_score[model_name] = scores
+    print(f"{model_name} cross-validation accuracy : {np.mean(scores):.2f}")
+
+rfc = RandomForestClassifier(random_state=42)
+rfc.fit(X_train_smote, Y_train_smote)
+
+y_test_pred = rfc.predict(X_test)
+print("Accuracy Score:\n", accuracy_score(Y_test, y_test_pred))
+print("Confusion Matrix:\n", confusion_matrix(Y_test, y_test_pred))
+print("Classification Report:\n", classification_report(Y_test, y_test_pred))
+
+model_data = {"model": rfc, "feature_names": X.columns.tolist()}
+
+with open("exit_predictor", "wb") as f:
+    pickle.dump(model_data, f)
+
+with open("exit_predictor", "rb") as f:
+    model_data = pickle.load(f)
+    loaded_model = model_data["model"]
+    feature_names = model_data["feature_names"]
+
+print(loaded_model)
+
+customer_data = {
+    "gender": "Female",
+    "SeniorCitizen": 0,
+    "Partner": "Yes",
+    "Dependents": "No",
+    "tenure": 1,
+    "PhoneService": "No",
+    "MultipleLines": "No phone service",
+    "InternetService": "DSL",
+    "OnlineSecurity": "No",
+    "OnlineBackup": "Yes",
+    "DeviceProtection": "No",
+    "TechSupport": "No",
+    "StreamingTV": "No",
+    "StreamingMovies": "No",
+    "Contract": "Month-to-month",
+    "PaperlessBilling": "Yes",
+    "PaymentMethod": "Electronic check",
+    "MonthlyCharges": 29.85,
+    "TotalCharges": 29.85
+}
+customer_data_df=pd.DataFrame([customer_data])
+
+with open("encoders.pkl","rb") as f:
+    encoders=pickle.load(f)
+
+for column,encoder in encoders.items():
+    customer_data_df[column]=encoder.transform(customer_data_df[column])
+#MAKING PREDICTION
+prediction=loaded_model.predict(customer_data_df)
+pred_prob=loaded_model.predict_proba(customer_data_df)
+print(f"Prediction:{"EXIT" if prediction[0]==1 else "NO-EXIT"}")
+print(f"Prediction probability:{pred_prob}")
